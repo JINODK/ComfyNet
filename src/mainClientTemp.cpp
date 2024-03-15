@@ -88,7 +88,7 @@ struct NTCstruct readNTC() {
     avg /= 5;
 
     if(ntc.temperature < avg + 2 && ntc.temperature > avg - 2) {
-        for(int i = 0; i < 5; i++) {
+        for(int i = 0; i < 4; i++) {
             lastTemp[i] = lastTemp[i+1]; // shift left
         }
         lastTemp[4] = ntc.temperature;
