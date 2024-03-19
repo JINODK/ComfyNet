@@ -1,7 +1,15 @@
-#define UID "wind1"
+#define UID "wind0"
+
+#define HAS_BME
 
 #include <Arduino.h>
-#include <WiFi.h>
+
+#include "networkHandler.h"
+
+#ifdef HAS_BME
+#include "sensorBME.h"
+struct BMEstruct BME;
+#endif
 
 #define ENCODER_PIN 27
 
@@ -19,31 +27,11 @@ void IRAM_ATTR handleInterrupt() {
     }  // else ignore as debounce
 }
 
-WiFiClient client;
 String payload = "";                   // tcp payload
 float lastCount[5] = {0, 0, 0, 0, 0};  // FIFO buffer for temperature
 
 // Wind params
 // calib: 1.0 - 7; 1.1 - 9; 1.3 - 12; 1.5 - 15; 1.6 - 17; 1.7 - 20; 1.9 - 24;
-
-void handleWifi() {
-    // if wifi got disconnected or not connected, reconnect
-    if (WiFi.status() != WL_CONNECTED) {
-        Serial.println("Connecting to WiFi...");
-        // try to connect
-        WiFi.begin(WIFI_SSID, WIFI_PASSWD);
-        while (WiFi.status() != WL_CONNECTED) {
-            delay(500);
-            Serial.print(".");
-            digitalWrite(22, !digitalRead(22));
-        }
-        Serial.println("\nConnected to WiFi");
-        Serial.println(WiFi.localIP());
-        // auto reconnect
-        WiFi.persistent(true);
-        WiFi.setAutoReconnect(true);
-    }
-}
 
 void setup() {
     Serial.begin(115200);
@@ -54,8 +42,13 @@ void setup() {
     attachInterrupt(ENCODER_PIN, handleInterrupt, RISING);
     pinMode(22, OUTPUT);
 
+    #ifdef HAS_BME
+    // setup bme
+    sensorBME.initBME();
+    #endif
+
     // connect to wifi
-    handleWifi();
+    networkHandler.initWifi();
 }
 
 void computeAvgCounter() {
@@ -84,16 +77,43 @@ void computeAvgCounter() {
     return;
 }
 
+void debugPrint() {
+    // print the number of interrupts
+    Serial.print(counter);
+    Serial.print("\t");
+    Serial.println(counterAvg);
+
+    Serial.print("Windspeed: ");
+    Serial.print(windspeed);
+    Serial.println(" m/s");
+
+    #ifdef HAS_BME
+    Serial.println("BME:");
+    Serial.print("Temperature: ");
+    Serial.print(BME.temperature);
+    Serial.print(" C\t");
+    Serial.print("Humidity: ");
+    Serial.print(BME.humidity);
+    Serial.print(" %\t");
+    Serial.print("Pressure: ");
+    Serial.print(BME.pressure);
+    Serial.print(" hPa\t");
+    Serial.print("Gas: ");
+    Serial.print(BME.gas);
+    Serial.println(" KOhm\t");
+    Serial.println("");
+    #endif
+}
+
 void loop() {
     // for every second
     if (millis() - lastTime >= 1000) {
         // read sensor
         computeAvgCounter();
 
-        // print the number of interrupts
-        Serial.print(counter);
-        Serial.print("\t");
-        Serial.println(counterAvg);
+        #ifdef HAS_BME
+        BME = sensorBME.readBME();
+        #endif
 
         // calculate windspeed
         windspeed = (counterAvg - -10.851063829787236) / 17.872340425531924;
@@ -104,21 +124,15 @@ void loop() {
         }
 
         // print to serial
-        Serial.print("Windspeed: ");
-        Serial.print(windspeed);
-        Serial.println(" m/s");
+        debugPrint();
 
         // send tcp packet to 192.168.4.1
-        if (!client.connected()) {
-            if (client.connect("192.168.4.1", 80)) {
-                // construct payload
-                payload = "?uid=" + String(UID) + "&windspeed=" + String(windspeed);
-                client.print(payload + "\r\n");
-                // ensure the data is sent
-                delay(500);
-                client.stop();
-            }
-        }
+        #ifdef HAS_BME
+        payload = "?uid=" + String(UID) + "&windspeed=" + String(windspeed) + "&temperature=" + String(BME.temperature) + "&humidity=" + String(BME.humidity) + "&pressure=" + String(BME.pressure) + "&gas=" + String(BME.gas) + "&";
+        #else
+        payload = "?uid=" + String(UID) + "&windspeed=" + String(windspeed) + "&";
+        #endif
+        networkHandler.sendTcp(payload, "192.168.4.1", 80);
 
         // reset the counter
         counter = 0;
@@ -128,5 +142,5 @@ void loop() {
         digitalWrite(22, !digitalRead(22));
     }
 
-    handleWifi();
+    networkHandler.handleWifi();
 }

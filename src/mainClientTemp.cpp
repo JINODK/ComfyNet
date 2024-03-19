@@ -1,12 +1,15 @@
 #define UID "temp0"
 
-#include <Arduino.h>
-#include <SPI.h>
-#include <WiFi.h>
-#include <Wire.h>
+#define HAS_BME
 
-#include "Adafruit_BME680.h"
-#include "Adafruit_Sensor.h"
+#include <Arduino.h>
+
+#include "networkHandler.h"
+
+#ifdef HAS_BME
+#include "sensorBME.h"
+struct BMEstruct BME;
+#endif
 
 #define NTC_PIN 36
 
@@ -15,21 +18,11 @@ struct NTCstruct {
     float resistance;
     float temperature;
 };
-struct BMEstruct {
-    float temperature;
-    float humidity;
-    float pressure;
-    float gas;
-};
 
 struct NTCstruct NTC;
-struct BMEstruct BME;
-
-Adafruit_BME680 bme;  // I2C
 
 unsigned long lastTime = 0;
 
-WiFiClient client;
 String payload = "";                  // tcp payload
 float lastTemp[5] = {0, 0, 0, 0, 0};  // FIFO buffer for temperature
 
@@ -38,48 +31,20 @@ float lastTemp[5] = {0, 0, 0, 0, 0};  // FIFO buffer for temperature
 // vcc = 2.22v
 // 24.6c = 0.91v
 
-void handleWifi() {
-    // if wifi got disconnected or not connected, reconnect
-    if (WiFi.status() != WL_CONNECTED) {
-        Serial.println("Connecting to WiFi...");
-        // try to connect
-        WiFi.begin(WIFI_SSID, WIFI_PASSWD);
-        while (WiFi.status() != WL_CONNECTED) {
-            delay(500);
-            Serial.print(".");
-            digitalWrite(22, !digitalRead(22));
-        }
-        Serial.println("\nConnected to WiFi");
-        Serial.println(WiFi.localIP());
-        // auto reconnect
-        WiFi.persistent(true);
-        WiFi.setAutoReconnect(true);
-    }
-}
-
 void setup() {
     Serial.begin(115200);
     Serial.println("Starting...");
 
     // setup hardware
     pinMode(NTC_PIN, INPUT);
-    pinMode(2, OUTPUT);
-
-    if (!bme.begin()) {
-        Serial.println("Could not find a valid BME680 sensor, check wiring!");
-        while (1)
-            ;
-    }
-
-    // Set up oversampling and filter initialization
-    bme.setTemperatureOversampling(BME680_OS_8X);
-    bme.setHumidityOversampling(BME680_OS_2X);
-    bme.setPressureOversampling(BME680_OS_4X);
-    bme.setIIRFilterSize(BME680_FILTER_SIZE_3);
-    bme.setGasHeater(320, 150);  // 320*C for 150 ms
+    
+    #ifdef HAS_BME
+    // setup bme
+    sensorBME.initBME();
+    #endif
 
     // connect to wifi
-    handleWifi();
+    networkHandler.initWifi(true);
 }
 
 struct NTCstruct readNTC() {
@@ -116,17 +81,37 @@ struct NTCstruct readNTC() {
     return ntc;
 }
 
-struct BMEstruct readBME() {
-    struct BMEstruct bmeData;
-    if (!bme.performReading()) {
-        Serial.println("Failed to poll sensor");
-        return bmeData;
-    }
-    bmeData.temperature = bme.temperature;
-    bmeData.humidity = bme.humidity;
-    bmeData.pressure = bme.pressure / 100.0;
-    bmeData.gas = bme.gas_resistance / 1000.0;
-    return bmeData;
+void debugPrint() {
+    Serial.println("NTC:");
+    Serial.print("Value: ");
+    Serial.print(analogRead(NTC_PIN));
+    Serial.print(" (0-1023)\t");
+    Serial.print("Voltage: ");
+    Serial.print(NTC.voltage);
+    Serial.print(" V\t");
+    Serial.print("Resistance: ");
+    Serial.print(NTC.resistance);
+    Serial.print(" Ohm\t");
+    Serial.print("Temperature: ");
+    Serial.print(NTC.temperature);
+    Serial.println(" C\t");
+
+    #ifdef HAS_BME
+    Serial.println("BME:");
+    Serial.print("Temperature: ");
+    Serial.print(BME.temperature);
+    Serial.print(" C\t");
+    Serial.print("Humidity: ");
+    Serial.print(BME.humidity);
+    Serial.print(" %\t");
+    Serial.print("Pressure: ");
+    Serial.print(BME.pressure);
+    Serial.print(" hPa\t");
+    Serial.print("Gas: ");
+    Serial.print(BME.gas);
+    Serial.println(" KOhm\t");
+    Serial.println("");
+    #endif
 }
 
 void loop() {
@@ -134,52 +119,25 @@ void loop() {
     if (millis() - lastTime >= 500) {
         // read sensors
         NTC = readNTC();
-        BME = readBME();
+
+        #ifdef HAS_BME
+        BME = sensorBME.readBME();
+        #endif
 
         // print to serial
-        Serial.println("NTC:");
-        Serial.print("Value: ");
-        Serial.print(analogRead(NTC_PIN));
-        Serial.print(" (0-1023)\t");
-        Serial.print("Voltage: ");
-        Serial.print(NTC.voltage);
-        Serial.print(" V\t");
-        Serial.print("Resistance: ");
-        Serial.print(NTC.resistance);
-        Serial.print(" Ohm\t");
-        Serial.print("Temperature: ");
-        Serial.print(NTC.temperature);
-        Serial.println(" C\t");
-
-        Serial.println("BME:");
-        Serial.print("Temperature: ");
-        Serial.print(BME.temperature);
-        Serial.print(" C\t");
-        Serial.print("Humidity: ");
-        Serial.print(BME.humidity);
-        Serial.print(" %\t");
-        Serial.print("Pressure: ");
-        Serial.print(BME.pressure);
-        Serial.print(" hPa\t");
-        Serial.print("Gas: ");
-        Serial.print(BME.gas);
-        Serial.println(" KOhm\t");
-        Serial.println("");
+        debugPrint();
 
         // send tcp packet to 192.168.4.1
-        if (!client.connected()) {
-            if (client.connect("192.168.4.1", 80)) {
-                // construct payload
-                payload = "?uid=" + String(UID) + "&tempNTC=" + String(NTC.temperature) + "&temp=" + String(BME.temperature) + "&hum=" + String(BME.humidity) + "&pres=" + String(BME.pressure) + "&gas=" + String(BME.gas) + "&";
-                client.print(payload + "\r\n");
-                // ensure the data is sent
-                delay(10);
-                client.stop();
-            }
-        }
+        #ifdef HAS_BME
+        payload = "?uid=" + String(UID) + "&tempNTC=" + String(NTC.temperature) + "&temp=" + String(BME.temperature) + "&hum=" + String(BME.humidity) + "&pres=" + String(BME.pressure) + "&gas=" + String(BME.gas) + "&";
+        #else
+        payload = "?uid=" + String(UID) + "&tempNTC=" + String(NTC.temperature) + "&";
+        #endif
+        networkHandler.sendTcp(payload, "192.168.4.1", 80);
+        
         // reset the timer
         lastTime = millis();
     }
 
-    handleWifi();
+    networkHandler.handleWifi();
 }
