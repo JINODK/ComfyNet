@@ -12,12 +12,17 @@ struct BMEstruct BME;
 #endif
 
 #define ENCODER_PIN 27
+#define PWR_RAIL 26
+#define PWR_BUTTON 25
 
 unsigned int counter = 0;
 float counterAvg = 0;
 float windspeed = 0;
 unsigned long lastTime = 0;
 unsigned long lastMicros = 0;
+unsigned long pwrBttnHold = 0;
+unsigned int pwrcount = 0;
+
 
 // setup interrupt on pin 14
 void IRAM_ATTR handleInterrupt() {
@@ -41,6 +46,8 @@ void setup() {
     pinMode(ENCODER_PIN, INPUT);
     attachInterrupt(ENCODER_PIN, handleInterrupt, RISING);
     pinMode(22, OUTPUT);
+    pinMode(PWR_RAIL, INPUT);
+    pinMode(PWR_BUTTON, OUTPUT);
 
     #ifdef HAS_BME
     // setup bme
@@ -106,8 +113,16 @@ void debugPrint() {
 }
 
 void loop() {
+    // if PWR_RAIL gets.. railed, pull PWR_BUTTON high for 1 second
+    if (!digitalRead(PWR_RAIL) && millis() > pwrBttnHold) {
+        pwrBttnHold = millis() + 1000;
+        pwrcount++;
+    }
+    if (millis() < pwrBttnHold) digitalWrite(PWR_BUTTON, HIGH);
+    else digitalWrite(PWR_BUTTON, LOW);
     // for every second
     if (millis() - lastTime >= 1000) {
+        Serial.println("Pwr cycles: " + String(pwrcount));
         // read sensor
         computeAvgCounter();
 

@@ -18,8 +18,9 @@ private:
 public:
     void initBME() {
         if (!bme.begin()) {
-            Serial.println("Could not find a valid BME680 sensor, check wiring!");
-            while (1);
+            Serial.println("Could not find a valid BME680 sensor, check wiring! restart in 5 seconds...");
+            delay(5000);
+            ESP.restart();
         }
         // Set up oversampling and filter initialization
         bme.setTemperatureOversampling(BME680_OS_8X);

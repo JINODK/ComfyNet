@@ -1,6 +1,6 @@
 #define UID "temp0"
 
-#define HAS_BME
+// #define HAS_BME
 
 #include <Arduino.h>
 
@@ -11,7 +11,7 @@
 struct BMEstruct BME;
 #endif
 
-#define NTC_PIN 36
+#define NTC_PIN 34
 
 struct NTCstruct {
     float voltage;
