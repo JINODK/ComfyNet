@@ -1,6 +1,6 @@
-#define UID "wind0"
+#define UID "wind1"
 
-#define HAS_BME
+// #define HAS_BME
 
 #include <Arduino.h>
 
@@ -11,9 +11,9 @@
 struct BMEstruct BME;
 #endif
 
-#define ENCODER_PIN 27
-#define PWR_RAIL 26
-#define PWR_BUTTON 25
+#define ENCODER_PIN D0 // blue wire
+#define PWR_RAIL D1 // black wire
+#define PWR_BUTTON D2 // white wire
 
 unsigned int counter = 0;
 float counterAvg = 0;
@@ -127,7 +127,27 @@ void loop() {
         computeAvgCounter();
 
         #ifdef HAS_BME
-        BME = sensorBME.readBME();
+        for (int i = 0; i < 5; i++) {
+            BME = sensorBME.readBME();
+            // check for sensor failure by checking if some value reaches an impossible value
+            // temp lower than 2 degrees
+            // pressure lower than 800 hPa
+            // gas lower than 2
+            if (BME.temperature < 2 || BME.pressure < 800 || BME.gas < 2) {
+                // give it another chance at life, if it fails 5 times, restart
+                if (i == 4) {
+                    // trigger sensor failure
+                    Serial.println("BME sensor failure, restart in 5 seconds...");
+                    // disconnect from wifi
+                    networkHandler.disconnectWifi();
+                    delay(5000);
+                    ESP.restart();
+                }
+            } else {
+                // if sensor is ok, break the loop to save time
+                break;
+            }
+        }
         #endif
 
         // calculate windspeed

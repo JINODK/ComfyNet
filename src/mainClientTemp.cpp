@@ -11,7 +11,7 @@
 struct BMEstruct BME;
 #endif
 
-#define NTC_PIN 34
+#define NTC_PIN D3
 
 struct NTCstruct {
     float voltage;
